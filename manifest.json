@@ -1,4 +1,3 @@
-
 {
   "manifest_version": 3,
   "name": "MacroCopy Pro",
@@ -8,10 +7,17 @@
     "contextMenus",
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
+  "commands": {
+    "toggle-floating": {
+      "suggested_key": { "default": "Alt+M" },
+      "description": "Toggle MacroCopy floating mode"
+    }
+  },
   "action": {
-    "default_popup": "index.html",
+    "default_popup": "dist/index.html?view=popup",
     "default_title": "MacroCopy Pro"
   },
   "background": {

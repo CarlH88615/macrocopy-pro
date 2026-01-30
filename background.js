@@ -99,3 +99,37 @@ chrome.runtime.onInstalled.addListener(rebuildMenu);
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.macros) rebuildMenu();
 });
+// --- Floating mode: toggle (open if closed, close if open) ---
+// Use a distinct `view=floating` flag so popup-specific CSS (fixed 420px width) is not applied.
+const FLOATING_URL = chrome.runtime.getURL("dist/index.html?view=floating&tab=smart-builder");
+
+async function findFloatingWindow() {
+  const windows = await chrome.windows.getAll({ populate: true });
+  return windows.find(
+    (w) => w.type === "popup" && w.tabs?.some((t) => t.url === FLOATING_URL)
+  );
+}
+
+async function toggleFloatingPopup() {
+  const existing = await findFloatingWindow();
+
+  // If it's already open, just bring it to front (don't close -> preserves state)
+  if (existing?.id) {
+    await chrome.windows.update(existing.id, { focused: true, state: "normal" });
+    return;
+  }
+
+  // Otherwise create it
+  await chrome.windows.create({
+    url: FLOATING_URL,
+    type: "popup",
+    width: 720,
+    height: 900,
+    focused: true,
+  });
+}
+
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle-floating") toggleFloatingPopup();
+});

@@ -1,4 +1,8 @@
+import "./src/index.css";
 
+if (new URLSearchParams(window.location.search).get('view') === 'popup') {
+  import('./src/popup.css');
+}
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

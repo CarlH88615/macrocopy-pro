@@ -16,7 +16,8 @@ import {
   HelpCircle,
   Hash,
   Mail,
-  Link as LinkIcon
+  Link as LinkIcon,
+  MessageSquare
 } from 'lucide-react';
 import { BuilderTemplate, MacroItem, ConditionType, ConditionLink } from '../types';
 import { INITIAL_BUILDERS } from '../constants';
@@ -24,6 +25,7 @@ import { INITIAL_BUILDERS } from '../constants';
 declare const chrome: any;
 
 type ItemStatus = 'received' | 'requested' | 'none';
+type ViewMode = 'note' | 'email';
 
 interface SmartBuilderProps {
   macros?: MacroItem[];
@@ -43,6 +45,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
   const [selectedOutcomes, setSelectedOutcomes] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [copiedMacroId, setCopiedMacroId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('note');
 
   // Load Templates
   useEffect(() => {
@@ -130,6 +133,39 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
     return noteParts.join('\n\n') || 'Start selecting items to build your note...';
   }, [docStatuses, docDetails, selectedOutcomes, activeTemplate]);
 
+  const generatedEmail = useMemo(() => {
+    if (!activeTemplate) return '';
+    
+    // Rule: IDNTF should say Selfie with ID
+    const translateLabel = (label: string) => label === 'IDNTF' ? 'Selfie with ID' : label;
+    
+    const received = activeTemplate.items
+      .filter(item => docStatuses[item] === 'received')
+      .map(translateLabel);
+      
+    const requested = activeTemplate.items
+      .filter(item => docStatuses[item] === 'requested')
+      .map(translateLabel);
+
+    if (received.length === 0 && requested.length === 0) {
+      return 'Start selecting items to build your email...';
+    }
+
+    let email = "Hello,\n\nThank you for sending your documents.\n";
+    
+    if (received.length > 0) {
+      email += `We have processed your ${received.join(', ')}.\n`;
+    }
+    
+    if (requested.length > 0) {
+      email += `But in order to complete verification we still require ${requested.join(', ')}.\n`;
+    }
+    
+    email += "\nPlease log into your account to upload.";
+    
+    return email;
+  }, [docStatuses, activeTemplate]);
+
   // Dynamic Logic: Determine which macros should be shown as quick copy buttons
   const activeLinks = useMemo(() => {
     if (!activeTemplate) return [];
@@ -149,8 +185,9 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
     });
   }, [activeTemplate, docStatuses, selectedOutcomes]);
 
-  const handleCopyNote = () => {
-    navigator.clipboard.writeText(generatedNote);
+  const handleCopyResult = () => {
+    const text = viewMode === 'note' ? generatedNote : generatedEmail;
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -236,7 +273,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto space-y-8 pb-12">
+           <div className="w-full max-w-none space-y-8 pb-12">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-10">
               {/* Basic Config */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -362,8 +399,8 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden animate-in fade-in duration-300">
-      <div className="px-8 py-6 border-b border-slate-100 bg-white flex items-center justify-between shrink-0">
+    <div className="flex flex-col h-full w-full max-w-full overflow-hidden animate-in fade-in duration-300">
+      <div className="px-8 py-6 border-b border-slate-100 bg-white flex items-center justify-between shrink-0 w-full">
         <div className="flex items-center gap-6">
           <div className="relative group">
             <select value={activeTemplateId} onChange={e => { setActiveTemplateId(e.target.value); reset(); }} className="appearance-none bg-slate-50 border border-slate-200 rounded-2xl px-6 py-3 pr-12 font-bold text-slate-800 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all cursor-pointer min-w-[240px]">
@@ -378,7 +415,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
         <button onClick={reset} className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors text-xs font-bold uppercase tracking-widest"><RotateCcw size={14} /> Reset Builder</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-8 bg-slate-50/30">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 bg-slate-50/30 w-full">
         {!activeTemplate ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-12">
             <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mb-6">
@@ -389,8 +426,8 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
             <button onClick={startNewTemplate} className="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-100">Create New Template</button>
           </div>
         ) : (
-          <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10">
-            <div className="space-y-10">
+          <div className="w-full max-w-full grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start gap-6 sm:gap-8 lg:gap-12">
+            <div className="space-y-10 min-w-0">
               {/* Main Checklist */}
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-2">
@@ -445,23 +482,49 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
             </div>
 
             {/* Result Panel */}
-            <div className="lg:sticky lg:top-8 self-start">
+            <div className="w-full min-w-0 lg:sticky lg:top-6">
               <div className="bg-white border border-slate-200 rounded-[3rem] p-10 shadow-2xl shadow-indigo-500/5 flex flex-col min-h-[500px]">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="p-4 bg-indigo-50 text-indigo-600 rounded-[1.25rem] shadow-sm"><FileCheck size={24} /></div>
-                  <div>
-                    <h3 className="font-bold text-slate-900 text-xl">Account Note</h3>
-                    <p className="text-xs text-slate-400 font-medium">Automatic formatting based on logic</p>
+                <div className="flex flex-col mb-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="p-4 bg-indigo-50 text-indigo-600 rounded-[1.25rem] shadow-sm">
+                        {viewMode === 'note' ? <FileCheck size={24} /> : <Mail size={24} />}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-xl">{viewMode === 'note' ? 'Account Note' : 'Generated Email'}</h3>
+                        <p className="text-xs text-slate-400 font-medium">Automatic formatting based on logic</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* View Mode Switcher */}
+                  <div className="flex bg-slate-100 p-1 rounded-2xl self-start">
+                    <button 
+                      onClick={() => setViewMode('note')}
+                      className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${viewMode === 'note' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      <MessageSquare size={16} /> Note
+                    </button>
+                    <button 
+                      onClick={() => setViewMode('email')}
+                      className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${viewMode === 'email' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      <Mail size={16} /> Email
+                    </button>
                   </div>
                 </div>
                 
                 <div className="flex-1 whitespace-pre-wrap font-mono text-slate-700 text-sm leading-relaxed p-8 bg-slate-50/50 rounded-[2rem] border border-slate-100 min-h-[240px]">
-                  {generatedNote}
+                  {viewMode === 'note' ? generatedNote : generatedEmail}
                 </div>
 
                 <div className="mt-8 space-y-4">
-                  <button onClick={handleCopyNote} disabled={generatedNote.includes('Start selecting items')} className={`w-full flex items-center justify-center gap-3 py-6 rounded-[1.75rem] font-bold text-xl transition-all disabled:opacity-50 ${copied ? 'bg-emerald-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-1 active:scale-95'}`}>
-                    {copied ? <><Check size={24} strokeWidth={3} /> Note Copied!</> : <><Copy size={24} /> Copy Note</>}
+                  <button 
+                    onClick={handleCopyResult} 
+                    disabled={(viewMode === 'note' ? generatedNote : generatedEmail).includes('Start selecting items')} 
+                    className={`w-full flex items-center justify-center gap-3 py-6 rounded-[1.75rem] font-bold text-xl transition-all disabled:opacity-50 ${copied ? 'bg-emerald-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-1 active:scale-95'}`}
+                  >
+                    {copied ? <><Check size={24} strokeWidth={3} /> Copied!</> : <><Copy size={24} /> Copy {viewMode === 'note' ? 'Note' : 'Email'}</>}
                   </button>
 
                   {/* Dynamic Macro Shortcuts Stack */}
