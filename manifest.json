@@ -1,0 +1,26 @@
+
+{
+  "manifest_version": 3,
+  "name": "MacroCopy Pro",
+  "version": "1.0.0",
+  "description": "Smart professional macro and note manager with right-click browser integration.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "MacroCopy Pro"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
