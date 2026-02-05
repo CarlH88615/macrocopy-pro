@@ -99,37 +99,54 @@ chrome.runtime.onInstalled.addListener(rebuildMenu);
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.macros) rebuildMenu();
 });
-// --- Floating mode: toggle (open if closed, close if open) ---
-// Use a distinct `view=floating` flag so popup-specific CSS (fixed 420px width) is not applied.
+// --- Floating mode: window-based popup (no content scripts) ---
 const FLOATING_URL = chrome.runtime.getURL("dist/index.html?view=floating&tab=smart-builder");
-
-async function findFloatingWindow() {
-  const windows = await chrome.windows.getAll({ populate: true });
-  return windows.find(
-    (w) => w.type === "popup" && w.tabs?.some((t) => t.url === FLOATING_URL)
-  );
-}
+let floatingWindowId = null;
 
 async function toggleFloatingPopup() {
-  const existing = await findFloatingWindow();
+  // If we already have a window id, try to focus it
+  if (floatingWindowId) {
+    try {
+      await chrome.windows.update(floatingWindowId, { focused: true, state: "normal" });
+      return;
+    } catch (e) {
+      // window might be gone, fall through to create
+      floatingWindowId = null;
+    }
+  }
 
-  // If it's already open, just bring it to front (don't close -> preserves state)
+  // Look for an existing matching popup (in case id was lost)
+  const windows = await chrome.windows.getAll({ populate: true });
+  const existing = windows.find(
+    (w) => w.type === "popup" && w.tabs?.some((t) => t.url === FLOATING_URL)
+  );
   if (existing?.id) {
+    floatingWindowId = existing.id;
     await chrome.windows.update(existing.id, { focused: true, state: "normal" });
     return;
   }
 
-  // Otherwise create it
-  await chrome.windows.create({
+  // Create new popup
+  const created = await chrome.windows.create({
     url: FLOATING_URL,
     type: "popup",
     width: 720,
     height: 900,
     focused: true,
   });
+  floatingWindowId = created.id || null;
 }
 
+chrome.windows.onRemoved.addListener((id) => {
+  if (id === floatingWindowId) {
+    floatingWindowId = null;
+  }
+});
 
 chrome.commands.onCommand.addListener((command) => {
   if (command === "toggle-floating") toggleFloatingPopup();
+});
+
+chrome.action.onClicked.addListener(() => {
+  toggleFloatingPopup();
 });

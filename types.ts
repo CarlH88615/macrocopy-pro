@@ -27,6 +27,7 @@ export interface BuilderTemplate {
   items: string[];
   outcomes: string[];
   links: ConditionLink[]; // New field for dynamic shortcuts
+  headerNote?: string; // Optional static header shown at top of generated notes
 }
 
 export interface AppState {

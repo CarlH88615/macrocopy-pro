@@ -17,7 +17,6 @@
     }
   },
   "action": {
-    "default_popup": "dist/index.html?view=popup",
     "default_title": "MacroCopy Pro"
   },
   "background": {

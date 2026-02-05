@@ -66,6 +66,27 @@ export const INITIAL_MACROS: MacroItem[] = [
     category: 'Emails',
     content: "Hey,<br><br>Thanks for getting back to us and for sending over the documents we needed 👍<br>I can confirm that your ID has been successfully verified, and any restrictions on your account have now been removed. Any pending withdrawals have also been processed and should be with you shortly.<br><br>That said, we do need to flag something important.<br><br>While your ID has passed our checks, it’s against our Terms and Conditions for payment methods to be used across multiple MrQ accounts. This means your card should only ever be used on your own account, and not on anyone else’s.<br><br>Here’s the official bit (Section 6.2):<br><br>6.2. You may only hold one account. If we discover that you hold or are operating more than one account and/or the same payment details are used across multiple accounts, these will be classified as “Duplicate Accounts.”<br>6.2.1. If Duplicate Accounts are identified, we reserve the right to close the duplicate account(s), leaving only one active account, unless there are grounds to close all accounts (for example, where multiple accounts have been deliberately or fraudulently opened).<br><br>We get that mistakes happen – we’re only human after all – so please take this as a friendly warning. From here on out, make sure your payment methods are only used on your own MrQ account. If we see your card being used on another account again, we’ll have no choice but to close the account. No drama, just keeping things safe and fair for everyone.<br><br>Cheers for understanding,",
     updatedAt: 1767801910640
+  },
+  {
+    id: '1890001000001',
+    title: 'EMAIL - AP low risk warning (docs received)',
+    category: 'Emails',
+    content: "Hey,<br><br>Thanks for sending over the requested documents 👍<br><br>I can confirm everything’s been reviewed and your account is good to go. Any restrictions have now been removed, and any pending withdrawals have been processed (if applicable).<br><br>Just a quick reminder about payment methods on your account:<br>- all cards, bank accounts or other payment methods must be in your name<br>- you shouldn’t use your payment methods on anyone else’s MrQ account, and you shouldn’t allow third-party payment methods to be used on your account<br><br>To keep things safe and fair, the payment method that was linked across accounts will remain blocked going forward. Please make sure anything you add from now on is yours.<br><br>If we see payment methods being used across accounts again, we may have to take further action, including account closure.<br><br>Cheers for understanding,",
+    updatedAt: 1890001000001
+  },
+  {
+    id: '1890001000002',
+    title: 'EMAIL - AP low risk warning (no docs / proactive)',
+    category: 'Emails',
+    content: "Hey,<br><br>We’ve noticed that a payment method linked to your MrQ account has been used across multiple accounts.<br><br>Just a quick reminder: all cards, bank accounts or other payment methods must be in your name. You shouldn’t use your payment methods on anyone else’s MrQ account, and you shouldn’t allow third-party payment methods to be used on your account.<br><br>To keep things safe and fair, the payment method linked across accounts will remain blocked going forward.<br><br>If we see payment methods being used across accounts again, we may have to take further action, including account closure.<br><br>Cheers for understanding,",
+    updatedAt: 1890001000002
+  },
+  {
+    id: '1890001000003',
+    title: 'EMAIL - AP high risk closure (shared payment method)',
+    category: 'Emails',
+    content: "Hello,<br><br>Following a review of your account, it has been identified that at least one payment method used on your account has also been used on another MrQ account.<br><br>As a result, and in line with our Terms and Conditions, a decision has been made to close your account. We’re unable to discuss the specific details behind this decision.<br><br>Any remaining balance on your account will be returned to the original payment method, where applicable, in line with our Terms.<br><br>For more information, you can view our full Terms and Conditions here:<br>https://mrq.com/terms-and-conditions<br><br>Kind regards,<br>MrQ Team",
+    updatedAt: 1890001000003
   }
 ];
 
@@ -96,6 +117,68 @@ export const INITIAL_BUILDERS: BuilderTemplate[] = [
         type: 'all_outcomes_selected',
         triggerLabel: '',
         macroId: '1752581076845' // ID pass WD sent
+      }
+    ]
+  },
+  {
+    id: 'apple-pay-linked',
+    name: 'Apple Pay review (linked accounts)',
+    primaryLabel: 'Apple Pay',
+    secondaryLabel: 'Linked accounts',
+    items: [],
+    outcomes: [
+      'High risk → Close',
+      'Medium risk → Restrict + request PoO',
+      'Low risk → Keep open + warn'
+    ],
+    links: [
+      {
+        id: 'link-apple-highrisk-close-1',
+        type: 'outcome_selected',
+        triggerLabel: 'High risk → Close',
+        macroId: '1890001000003' // Send: AP high risk closure email
+      },
+      {
+        id: 'link-apple-lowrisk-docs-2',
+        type: 'outcome_selected',
+        triggerLabel: 'Low risk → Keep open + warn',
+        macroId: '1890001000001' // Send: Low risk warning (docs received)
+      },
+      {
+        id: 'link-apple-lowrisk-nodocs-2',
+        type: 'outcome_selected',
+        triggerLabel: 'Low risk → Keep open + warn',
+        macroId: '1890001000002' // Send: Low risk warning (no docs)
+      }
+    ]
+  },
+  {
+    id: 'seon-closed-kyc',
+    name: 'SEON closed (KYC review)',
+    primaryLabel: 'SEON',
+    secondaryLabel: 'KYC review',
+    headerNote: '**Account closed by SEON due to high risk score triggered**',
+    items: [
+      'ID',
+      'POA'
+    ],
+    outcomes: [
+      'Re-opened',
+      'Remains closed (SEON high risk)',
+      'Request more docs'
+    ],
+    links: [
+      {
+        id: 'link-seon-reopened',
+        type: 'outcome_selected',
+        triggerLabel: 'Re-opened',
+        macroId: '1753184295052' // TODO: confirm macro for account active email (KYC approved)
+      },
+      {
+        id: 'link-seon-closed',
+        type: 'outcome_selected',
+        triggerLabel: 'Remains closed (SEON high risk)',
+        macroId: '1752579395624' // TODO: confirm macro for business decision / T&Cs closure
       }
     ]
   }

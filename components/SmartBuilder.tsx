@@ -20,19 +20,21 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { BuilderTemplate, MacroItem, ConditionType, ConditionLink } from '../types';
-import { INITIAL_BUILDERS } from '../constants';
+import { INITIAL_BUILDERS, INITIAL_MACROS } from '../constants';
+import { normalizeEmailText } from '../utils/normalize';
 
 declare const chrome: any;
 
-type ItemStatus = 'received' | 'requested' | 'none';
+type ItemStatus = 'received' | 'requested' | 'rejected' | 'none';
 type ViewMode = 'note' | 'email';
 
 interface SmartBuilderProps {
   macros?: MacroItem[];
   handleCopyMacro?: (item: MacroItem) => Promise<void>;
+  onMacrosChange?: (macros: MacroItem[]) => void;
 }
 
-const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacro }) => {
+const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacro, onMacrosChange }) => {
   // Persistence State
   const [templates, setTemplates] = useState<BuilderTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState<string>('');
@@ -46,6 +48,16 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
   const [copied, setCopied] = useState(false);
   const [copiedMacroId, setCopiedMacroId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('note');
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [builderDraft, setBuilderDraft] = useState<{
+    name: string;
+    primaryLabel: string;
+    secondaryLabel: string;
+    headerNote: string;
+    itemsText: string;
+    outcomesText: string;
+  } | null>(null);
+  const [macroEdit, setMacroEdit] = useState<{ id: string; title: string; content: string } | null>(null);
 
   // Load Templates
   useEffect(() => {
@@ -115,19 +127,131 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
     setSelectedOutcomes([]);
   };
 
+  const startBuilderEdit = () => {
+    if (!activeTemplate) return;
+    setBuilderDraft({
+      name: activeTemplate.name,
+      primaryLabel: activeTemplate.primaryLabel,
+      secondaryLabel: activeTemplate.secondaryLabel,
+      headerNote: activeTemplate.headerNote || '',
+      itemsText: activeTemplate.items.join('\n'),
+      outcomesText: activeTemplate.outcomes.join('\n')
+    });
+    setIsEditMode(true);
+  };
+
+  const cancelBuilderEdit = () => {
+    setBuilderDraft(null);
+    setIsEditMode(false);
+  };
+
+  const saveBuilderEdit = () => {
+    if (!activeTemplate || !builderDraft) return;
+    const updated: BuilderTemplate = {
+      ...activeTemplate,
+      name: builderDraft.name.trim() || activeTemplate.name,
+      primaryLabel: builderDraft.primaryLabel.trim() || activeTemplate.primaryLabel,
+      secondaryLabel: builderDraft.secondaryLabel.trim() || activeTemplate.secondaryLabel,
+      headerNote: builderDraft.headerNote.trim() || undefined,
+      items: builderDraft.itemsText.split(/\r?\n/).map(i => i.trim()).filter(Boolean),
+      outcomes: builderDraft.outcomesText.split(/\r?\n/).map(i => i.trim()).filter(Boolean),
+      links: activeTemplate.links || []
+    };
+    setTemplates(prev => prev.map(t => t.id === updated.id ? updated : t));
+    setActiveTemplateId(updated.id);
+    setIsEditMode(false);
+    setBuilderDraft(null);
+    alert('Builder saved.');
+  };
+
+  const startMacroEdit = (macro: MacroItem) => {
+    setMacroEdit({ id: macro.id, title: macro.title, content: macro.content });
+  };
+
+  const cancelMacroEdit = () => setMacroEdit(null);
+
+  const saveMacroEdit = () => {
+    if (!macroEdit) return;
+    const updated = macros.map(m => m.id === macroEdit.id ? { ...m, content: macroEdit.content, updatedAt: Date.now() } : m);
+    onMacrosChange?.(updated);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ macros: updated });
+    } else {
+      localStorage.setItem('macro_system_data', JSON.stringify(updated));
+    }
+    alert('Macro saved.');
+    setMacroEdit(null);
+  };
+
   const generatedNote = useMemo(() => {
     if (!activeTemplate) return '';
     const received = activeTemplate.items.filter(item => docStatuses[item] === 'received');
     const requested = activeTemplate.items.filter(item => docStatuses[item] === 'requested');
+    const rejected = activeTemplate.items.filter(item => docStatuses[item] === 'rejected');
     const outcomes = selectedOutcomes;
     let noteParts: string[] = [];
+    const isSeonTemplate = activeTemplate?.id === 'seon-closed-kyc';
+    const isAppleTemplate = activeTemplate?.id === 'apple-pay-linked';
+    let handledOutcome = false;
+    if (activeTemplate.headerNote) {
+      noteParts.push(activeTemplate.headerNote);
+    }
+    if (isAppleTemplate) {
+      noteParts.push('**ApplePay has been used on multiple accounts**');
+    }
     if (received.length > 0) {
       noteParts.push(`**Received:**\n${received.map(i => `- ${i}${docDetails[i] ? ' ' + docDetails[i] : ''}`).join('\n')}`);
     }
     if (requested.length > 0) {
       noteParts.push(`**Requested:**\n${requested.map(i => `- ${i}`).join('\n')}`);
     }
-    if (outcomes.length > 0) {
+    if (rejected.length > 0) {
+      noteParts.push(`**Rejected:**\n${rejected.map(i => `- ${i}${docDetails[i] ? ' ' + docDetails[i] : ''}`).join('\n')}`);
+    }
+    if (isSeonTemplate && outcomes.length > 0) {
+      const selected = outcomes[0]; // only one outcome is meaningful here
+      const actions: string[] = [];
+      let outcomeText = '';
+      if (selected === 'Re-opened') {
+        noteParts.push('**Review:**\n- KYC provided and reviewed: Risk reduced and account deemed low risk');
+        actions.push('SA flag removed', 'Manual KYC passed', 'SDD flag approved');
+        outcomeText = 'Account reopened / active';
+      } else if (selected === 'Remains closed (SEON high risk)') {
+        noteParts.push('**Review:**\n- SEON deemed this account high risk');
+        outcomeText = 'Account to remain closed';
+      } else if (selected === 'Request more docs') {
+        actions.push('Restrictions remain in place / awaiting documents');
+        const outstanding = [...requested, ...rejected];
+        const extra = outstanding.length > 0 ? `Additional KYC required: ${outstanding.join(', ')}` : 'Additional KYC required';
+        outcomeText = extra;
+      }
+      if (actions.length > 0) {
+        noteParts.push(`**Actions:**\n${actions.map(a => `- ${a}`).join('\n')}`);
+      }
+      if (outcomeText) {
+        noteParts.push(`**Outcome:**\n- ${outcomeText}`);
+      }
+      handledOutcome = true;
+    }
+
+    if (isAppleTemplate && outcomes.length > 0) {
+      const selected = outcomes[0];
+      if (selected === 'High risk → Close') {
+        noteParts.push('**Review:**\n- High risk linkage (SE/GS/Time-out etc)');
+        noteParts.push('**Outcome:**\n- Account closed. No docs requested.');
+      } else if (selected === 'Medium risk → Restrict + request PoO') {
+        noteParts.push('**Review:**\n- Medium risk linkage (bonus abuse/limits/AML controls etc)');
+        noteParts.push('**Actions:**\n- Restrictions applied\n- Payment method remains blocked\n- Requested: PoO of Apple Pay (blocked)');
+        noteParts.push('**Outcome:**\n- Pending review (awaiting documents)');
+      } else if (selected === 'Low risk → Keep open + warn') {
+        noteParts.push('**Review:**\n- Low risk linkage identified.');
+        noteParts.push('**Actions:**\n- Restrictions removed\n- Payment method remains blocked\n- Both accounts warned');
+        noteParts.push('**Outcome:**\n- Account remains open');
+      }
+      handledOutcome = true;
+    }
+
+    if (outcomes.length > 0 && !handledOutcome) {
       noteParts.push(`**Outcome:**\n${outcomes.map(o => `- ${o}`).join('\n')}`);
     }
     return noteParts.join('\n\n') || 'Start selecting items to build your note...';
@@ -147,7 +271,29 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
       .filter(item => docStatuses[item] === 'requested')
       .map(translateLabel);
 
-    if (received.length === 0 && requested.length === 0) {
+    const rejected = activeTemplate.items
+      .filter(item => docStatuses[item] === 'rejected')
+      .map(translateLabel);
+
+    const isSeonTemplate = activeTemplate?.id === 'seon-closed-kyc';
+    const seonOutcome = selectedOutcomes[0];
+    const isAppleTemplate = activeTemplate?.id === 'apple-pay-linked';
+    const appleOutcome = selectedOutcomes[0];
+
+    if (isSeonTemplate && (seonOutcome === 'Re-opened' || seonOutcome === 'Remains closed (SEON high risk)') && requested.length === 0 && rejected.length === 0) {
+      return 'Use the macro shortcut for this outcome.';
+    }
+
+    if (isAppleTemplate) {
+      if (appleOutcome === 'Low risk → Keep open + warn') {
+        return 'Use the macro shortcut for this outcome.';
+      }
+      if (appleOutcome === 'High risk → Close') {
+        return 'No email required for this outcome.';
+      }
+    }
+
+    if (received.length === 0 && requested.length === 0 && rejected.length === 0) {
       return 'Start selecting items to build your email...';
     }
 
@@ -158,13 +304,17 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
     }
     
     if (requested.length > 0) {
-      email += `But in order to complete verification we still require ${requested.join(', ')}.\n`;
+      email += `We still require:\n${requested.map(r => `- ${r}`).join('\n')}\n`;
+    }
+
+    if (rejected.length > 0) {
+      email += `Please resubmit:\n${rejected.map(r => `- Resubmit: ${r} (previous submission could not be accepted).`).join('\n')}\n`;
     }
     
     email += "\nPlease log into your account to upload.";
     
-    return email;
-  }, [docStatuses, activeTemplate]);
+    return normalizeEmailText(email);
+  }, [docStatuses, activeTemplate, selectedOutcomes]);
 
   // Dynamic Logic: Determine which macros should be shown as quick copy buttons
   const activeLinks = useMemo(() => {
@@ -193,11 +343,27 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
   };
 
   const handleCopyLinkedMacro = async (macroId: string) => {
-    const macro = macros.find(m => m.id === macroId);
+    const macro = macros.find(m => m.id === macroId) || INITIAL_MACROS.find(m => m.id === macroId);
     if (macro && handleCopyMacro) {
       await handleCopyMacro(macro);
       setCopiedMacroId(macroId);
       setTimeout(() => setCopiedMacroId(null), 2000);
+    }
+  };
+
+  const resetBuilderStorage = () => {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ builderTemplates: INITIAL_BUILDERS });
+    } else {
+      localStorage.setItem('builder_templates', JSON.stringify(INITIAL_BUILDERS));
+    }
+  };
+
+  const resetMacroStorage = () => {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ macros: INITIAL_MACROS });
+    } else {
+      localStorage.setItem('macro_system_data', JSON.stringify(INITIAL_MACROS));
     }
   };
 
@@ -220,6 +386,23 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
       links: []
     });
     setIsEditingTemplate(true);
+  };
+
+  const handleResetBuilders = () => {
+    if (!confirm('Reset builder templates to defaults?')) return;
+    setTemplates(INITIAL_BUILDERS);
+    if (INITIAL_BUILDERS.length > 0) {
+      setActiveTemplateId(INITIAL_BUILDERS[0].id);
+    }
+    reset();
+    resetBuilderStorage();
+    alert('Builder templates reset to defaults.');
+  };
+
+  const handleResetMacros = () => {
+    if (!confirm('Reset macros to defaults?')) return;
+    resetMacroStorage();
+    alert('Macros reset to defaults.');
   };
 
   const addLink = () => {
@@ -399,6 +582,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
   }
 
   return (
+    <>
     <div className="flex flex-col h-full w-full max-w-full overflow-hidden animate-in fade-in duration-300">
       <div className="px-8 py-6 border-b border-slate-100 bg-white flex items-center justify-between shrink-0 w-full">
         <div className="flex items-center gap-6">
@@ -411,8 +595,13 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
           <div className="h-8 w-[1px] bg-slate-200"></div>
           <button onClick={startEditing} className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit Template"><Settings size={20} /></button>
           <button onClick={startNewTemplate} className="p-3 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="New Template"><Plus size={20} /></button>
+          <button onClick={startBuilderEdit} className={`px-3 py-2 text-xs font-bold rounded-xl border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600' : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`} title="Inline edit mode">Edit</button>
         </div>
-        <button onClick={reset} className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors text-xs font-bold uppercase tracking-widest"><RotateCcw size={14} /> Reset Builder</button>
+        <div className="flex items-center gap-3">
+          <button onClick={reset} className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors text-xs font-bold uppercase tracking-widest"><RotateCcw size={14} /> Reset Builder</button>
+          <button onClick={handleResetBuilders} className="text-[11px] font-bold text-indigo-600 hover:underline">Reset builders</button>
+          <button onClick={handleResetMacros} className="text-[11px] font-bold text-indigo-600 hover:underline">Reset macros</button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 bg-slate-50/30 w-full">
@@ -428,6 +617,24 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
         ) : (
           <div className="w-full max-w-full grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-start gap-6 sm:gap-8 lg:gap-12">
             <div className="space-y-10 min-w-0">
+              {isEditMode && builderDraft && (
+                <div className="p-5 bg-white border border-indigo-100 rounded-2xl shadow-sm space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.name} onChange={e => setBuilderDraft({...builderDraft, name: e.target.value})} placeholder="Builder name" />
+                    <input className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.headerNote} onChange={e => setBuilderDraft({...builderDraft, headerNote: e.target.value})} placeholder="Header note (optional)" />
+                    <input className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.primaryLabel} onChange={e => setBuilderDraft({...builderDraft, primaryLabel: e.target.value})} placeholder="Primary label" />
+                    <input className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.secondaryLabel} onChange={e => setBuilderDraft({...builderDraft, secondaryLabel: e.target.value})} placeholder="Secondary label" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <textarea className="w-full h-28 px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.itemsText} onChange={e => setBuilderDraft({...builderDraft, itemsText: e.target.value})} placeholder="Items (one per line)"></textarea>
+                    <textarea className="w-full h-28 px-3 py-2 border border-slate-200 rounded-lg" value={builderDraft.outcomesText} onChange={e => setBuilderDraft({...builderDraft, outcomesText: e.target.value})} placeholder="Outcomes (one per line)"></textarea>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={saveBuilderEdit} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold">Save</button>
+                    <button onClick={cancelBuilderEdit} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-bold">Cancel</button>
+                  </div>
+                </div>
+              )}
               {/* Main Checklist */}
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-2">
@@ -435,6 +642,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
                   <div className="flex gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     <span className="w-16 text-center">Received</span>
                     <span className="w-16 text-center">Requested</span>
+                    <span className="w-16 text-center">Rejected</span>
                   </div>
                 </div>
                 <div className="space-y-3">
@@ -449,6 +657,7 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
                         <div className="flex items-center gap-4">
                           <button onClick={() => setItemStatus(item, 'received')} className={`w-16 h-10 rounded-2xl border flex items-center justify-center transition-all ${docStatuses[item] === 'received' ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200' : 'bg-white border-slate-200 text-slate-300 hover:border-emerald-300 hover:text-emerald-400'}`}><Check size={20} strokeWidth={3} /></button>
                           <button onClick={() => setItemStatus(item, 'requested')} className={`w-16 h-10 rounded-2xl border flex items-center justify-center transition-all ${docStatuses[item] === 'requested' ? 'bg-orange-500 border-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white border-slate-200 text-slate-300 hover:border-orange-300 hover:text-orange-400'}`}><HelpCircle size={20} strokeWidth={2.5} /></button>
+                          <button onClick={() => setItemStatus(item, 'rejected')} className={`w-16 h-10 rounded-2xl border flex items-center justify-center transition-all ${docStatuses[item] === 'rejected' ? 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-200' : 'bg-white border-slate-200 text-slate-300 hover:border-red-300 hover:text-red-400'}`}><X size={20} strokeWidth={3} /></button>
                         </div>
                       </div>
                       {docStatuses[item] === 'received' && (item.toLowerCase().includes('poo') || item.toLowerCase().includes('ownership')) && (
@@ -522,24 +731,29 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
                   <button 
                     onClick={handleCopyResult} 
                     disabled={(viewMode === 'note' ? generatedNote : generatedEmail).includes('Start selecting items')} 
-                    className={`w-full flex items-center justify-center gap-3 py-6 rounded-[1.75rem] font-bold text-xl transition-all disabled:opacity-50 ${copied ? 'bg-emerald-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-1 active:scale-95'}`}
+                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-[1.25rem] font-bold text-base transition-all disabled:opacity-50 ${copied ? 'bg-emerald-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-1 active:scale-95'}`}
                   >
-                    {copied ? <><Check size={24} strokeWidth={3} /> Copied!</> : <><Copy size={24} /> Copy {viewMode === 'note' ? 'Note' : 'Email'}</>}
+                    {copied ? <><Check size={20} strokeWidth={3} /> Copied!</> : <><Copy size={20} /> Copy {viewMode === 'note' ? 'Note' : 'Email'}</>}
                   </button>
 
                   {/* Dynamic Macro Shortcuts Stack */}
                   <div className="space-y-3 animate-in fade-in duration-500">
                     {activeLinks.map(link => {
-                      const macro = macros.find(m => m.id === link.macroId);
+                      const macro = macros.find(m => m.id === link.macroId) || INITIAL_MACROS.find(m => m.id === link.macroId);
                       if (!macro) return null;
                       return (
-                        <button key={link.id} onClick={() => handleCopyLinkedMacro(macro.id)} className={`w-full flex items-center justify-between gap-3 px-8 py-4 rounded-[1.5rem] font-bold text-sm transition-all border group ${copiedMacroId === macro.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700'}`}>
-                          <div className="flex items-center gap-3">
-                            <Mail size={18} className={copiedMacroId === macro.id ? 'text-white' : 'text-emerald-600 group-hover:scale-110 transition-transform'} />
-                            <span>Copy '{macro.title}'</span>
-                          </div>
-                          {copiedMacroId === macro.id ? <Check size={18} strokeWidth={3} /> : <Copy size={16} className="opacity-40" />}
-                        </button>
+                        <div key={link.id} className={`w-full flex items-center justify-between gap-3 px-8 py-4 rounded-[1.5rem] font-bold text-sm transition-all border group ${copiedMacroId === macro.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700'}`}>
+                          <button onClick={() => handleCopyLinkedMacro(macro.id)} className="flex-1 flex items-center justify-between gap-3 text-left">
+                            <div className="flex items-center gap-3">
+                              <Mail size={18} className={copiedMacroId === macro.id ? 'text-white' : 'text-emerald-600 group-hover:scale-110 transition-transform'} />
+                              <span>Copy '{macro.title}'</span>
+                            </div>
+                            {copiedMacroId === macro.id ? <Check size={18} strokeWidth={3} /> : <Copy size={16} className="opacity-40" />}
+                          </button>
+                          {isEditMode && (
+                            <button onClick={() => startMacroEdit(macro)} className="text-[11px] font-bold text-indigo-600 hover:underline px-2">Edit macro</button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -550,7 +764,27 @@ const SmartBuilder: React.FC<SmartBuilderProps> = ({ macros = [], handleCopyMacr
         )}
       </div>
     </div>
+    {macroEdit && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="bg-white rounded-2xl shadow-2xl w-[90%] max-w-xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-lg text-slate-900">Edit macro</h3>
+            <button onClick={cancelMacroEdit} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+          </div>
+          <div className="text-sm font-semibold text-slate-600">{macroEdit.title}</div>
+          <textarea className="w-full h-48 border border-slate-200 rounded-xl p-3 text-sm" value={macroEdit.content} onChange={e => setMacroEdit({...macroEdit, content: e.target.value})} />
+          <div className="flex gap-3 justify-end">
+            <button onClick={cancelMacroEdit} className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 font-bold text-sm">Cancel</button>
+            <button onClick={saveMacroEdit} className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm">Save</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
 export default SmartBuilder;
+
+// Modal for macro edit
+// (Placed after component for clarity; rendered inside return above)

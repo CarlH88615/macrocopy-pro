@@ -21,10 +21,17 @@ import {
 } from 'lucide-react';
 import { MacroItem, CategoryType } from './types';
 import { INITIAL_MACROS, CATEGORY_ICONS } from './constants';
+import { normalizeEmailText } from './utils/normalize';
 import RichTextEditor from './components/RichTextEditor';
 import SmartBuilder from './components/SmartBuilder';
 
 declare const chrome: any;
+
+const mergeInitialMacros = (existing: MacroItem[]) => {
+  const existingIds = new Set(existing.map(m => m.id));
+  const missing = INITIAL_MACROS.filter(m => !existingIds.has(m.id));
+  return [...missing, ...existing];
+};
 
 const App: React.FC = () => {
   const [macros, setMacros] = useState<MacroItem[]>([]);
@@ -108,16 +115,17 @@ else setIsAppView(false);
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       setIsExtensionMode(true);
       chrome.storage.local.get(['macros'], (result: any) => {
-        if (result.macros && result.macros.length > 0) {
-          setMacros(result.macros);
-        } else {
-          setMacros(INITIAL_MACROS);
-          chrome.storage.local.set({ macros: INITIAL_MACROS });
-        }
+        const stored = (result.macros && result.macros.length > 0) ? result.macros : INITIAL_MACROS;
+        const merged = mergeInitialMacros(stored);
+        setMacros(merged);
+        chrome.storage.local.set({ macros: merged });
       });
     } else {
       const saved = localStorage.getItem('macro_system_data');
-      setMacros(saved ? JSON.parse(saved) : INITIAL_MACROS);
+      const parsed = saved ? JSON.parse(saved) : INITIAL_MACROS;
+      const merged = mergeInitialMacros(parsed);
+      setMacros(merged);
+      localStorage.setItem('macro_system_data', JSON.stringify(merged));
     }
   }, []);
 
@@ -150,7 +158,7 @@ else setIsAppView(false);
     
     const temp = document.createElement('textarea');
     temp.innerHTML = formatted;
-    const finalResult = temp.value;
+    const finalResult = normalizeEmailText(temp.value);
     
     return navigator.clipboard.writeText(finalResult).then(() => {
       setCopiedId(item.id);
@@ -320,7 +328,7 @@ else setIsAppView(false);
         </div>
         <div className="flex-1 min-h-0">
           {activeTab === 'Builder' ? (
-            <SmartBuilder macros={macros} handleCopyMacro={handleCopy} />
+            <SmartBuilder macros={macros} handleCopyMacro={handleCopy} onMacrosChange={setMacros} />
           ) : (
             <div className="flex flex-col h-full">{renderLibrary()}</div>
           )}
@@ -395,7 +403,7 @@ else setIsAppView(false);
         )}
 
         {isPopupView || activeTab === 'Builder' ? (
-          <SmartBuilder macros={macros} handleCopyMacro={handleCopy} />
+          <SmartBuilder macros={macros} handleCopyMacro={handleCopy} onMacrosChange={setMacros} />
         ) : (
           <>{renderLibrary()}</>
         )}
